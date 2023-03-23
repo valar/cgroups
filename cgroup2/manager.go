@@ -561,7 +561,7 @@ func (c *Manager) Stat() (*stats.Metrics, error) {
 		Current: getPidValue("pids.current", out),
 		Limit:   getPidValue("pids.max", out),
 	}
-	metrics.CPU = &stats.CPUStat{
+	metrics.Cpu = &stats.CPUStat{
 		UsageUsec:     getUint64Value("usage_usec", out),
 		UserUsec:      getUint64Value("user_usec", out),
 		SystemUsec:    getUint64Value("system_usec", out),

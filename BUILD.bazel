@@ -1,0 +1,13 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+load("@bazel_gazelle//:def.bzl", "gazelle")
+load("@rules_pkg//:mappings.bzl", "pkg_attributes", "pkg_filegroup", "pkg_files", "pkg_mkdirs", "strip_prefix")
+load("@rules_pkg//:pkg.bzl", "pkg_deb", "pkg_tar")
+
+# gazelle:prefix github.com/containerd/cgroups/v3
+gazelle(name = "gazelle")
+
+go_test(
+    name = "cgroups_test",
+    srcs = ["utils_test.go"],
+    embed = [":cgroups"],
+)
