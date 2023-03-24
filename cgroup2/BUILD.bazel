@@ -17,7 +17,7 @@ go_library(
         "state.go",
         "utils.go",
     ],
-    importpath = "github.com/containerd/cgroups/cgroup2/v3",
+    importpath = "github.com/containerd/cgroups/v3/cgroup2",
     visibility = ["//visibility:public"],
     deps = [
         "@com_github_cilium_ebpf//:go_default_library",
