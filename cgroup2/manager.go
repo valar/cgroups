@@ -585,14 +585,14 @@ func (c *Manager) Stat() (*stats.Metrics, error) {
 		Current: getStatFileContentUint64(filepath.Join(c.path, "pids.current")),
 		Limit:   getStatFileContentUint64(filepath.Join(c.path, "pids.max")),
 	}
-	metrics.CPU = &stats.CPUStat{
+	metrics.Cpu = &stats.CPUStat{
 		UsageUsec:     out["usage_usec"],
 		UserUsec:      out["user_usec"],
 		SystemUsec:    out["system_usec"],
 		NrPeriods:     out["nr_periods"],
 		NrThrottled:   out["nr_throttled"],
 		ThrottledUsec: out["throttled_usec"],
-		PSI:           getStatPSIFromFile(filepath.Join(c.path, "cpu.pressure")),
+		Psi:           getStatPSIFromFile(filepath.Join(c.path, "cpu.pressure")),
 	}
 	metrics.Memory = &stats.MemoryStat{
 		Anon:                  out["anon"],
@@ -632,7 +632,7 @@ func (c *Manager) Stat() (*stats.Metrics, error) {
 		SwapUsage:             getStatFileContentUint64(filepath.Join(c.path, "memory.swap.current")),
 		SwapLimit:             getStatFileContentUint64(filepath.Join(c.path, "memory.swap.max")),
 		SwapMaxUsage:          getStatFileContentUint64(filepath.Join(c.path, "memory.swap.peak")),
-		PSI:                   getStatPSIFromFile(filepath.Join(c.path, "memory.pressure")),
+		Psi:                   getStatPSIFromFile(filepath.Join(c.path, "memory.pressure")),
 	}
 	if len(memoryEvents) > 0 {
 		metrics.MemoryEvents = &stats.MemoryEvents{
@@ -645,7 +645,7 @@ func (c *Manager) Stat() (*stats.Metrics, error) {
 	}
 	metrics.Io = &stats.IOStat{
 		Usage: readIoStats(c.path),
-		PSI:   getStatPSIFromFile(filepath.Join(c.path, "io.pressure")),
+		Psi:   getStatPSIFromFile(filepath.Join(c.path, "io.pressure")),
 	}
 	metrics.Rdma = &stats.RdmaStat{
 		Current: rdmaStats(filepath.Join(c.path, "rdma.current")),
