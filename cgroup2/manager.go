@@ -227,7 +227,7 @@ type Manager struct {
 }
 
 func (manager *Manager) Path() string {
-	return manager.path
+	return strings.TrimPrefix(manager.path, defaultCgroup2Path)
 }
 
 func setResources(path string, resources *Resources) error {
