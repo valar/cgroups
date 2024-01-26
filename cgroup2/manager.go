@@ -226,6 +226,10 @@ type Manager struct {
 	path              string
 }
 
+func (manager *Manager) Path() string {
+	return manager.path
+}
+
 func setResources(path string, resources *Resources) error {
 	if resources != nil {
 		if err := writeValues(path, resources.Values()); err != nil {
