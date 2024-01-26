@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,49 +30,84 @@ import (
 	"go.uber.org/goleak"
 )
 
+func setupForNewSystemd(t *testing.T) (cmd *exec.Cmd, group string) {
+	cmd = exec.Command("cat")
+	err := cmd.Start()
+	require.NoError(t, err, "failed to start cat process")
+	proc := cmd.Process
+	require.NotNil(t, proc, "process was nil")
+
+	group = fmt.Sprintf("testing-watcher-%d.scope", proc.Pid)
+
+	return
+}
+
+func TestErrorsWhenUnitAlreadyExists(t *testing.T) {
+	checkCgroupMode(t)
+
+	cmd, group := setupForNewSystemd(t)
+	proc := cmd.Process
+
+	_, err := NewSystemd("", group, proc.Pid, &Resources{})
+	require.NoError(t, err, "Failed to init new cgroup manager")
+
+	_, err = NewSystemd("", group, proc.Pid, &Resources{})
+	if err == nil {
+		t.Fatal("Expected recreating cgroup manager should fail")
+	} else if !isUnitExists(err) {
+		t.Fatalf("Failed to init cgroup manager with unexpected error: %s", err)
+	}
+}
+
+// kubelet relies on this behavior to make sure a slice exists
+func TestIgnoreUnitExistsWhenPidNegativeOne(t *testing.T) {
+	checkCgroupMode(t)
+
+	cmd, group := setupForNewSystemd(t)
+	proc := cmd.Process
+
+	_, err := NewSystemd("", group, proc.Pid, &Resources{})
+	require.NoError(t, err, "Failed to init new cgroup manager")
+
+	_, err = NewSystemd("", group, -1, &Resources{})
+	require.NoError(t, err, "Expected to be able to recreate cgroup manager")
+}
+
 //nolint:staticcheck // Staticcheck false positives for nil pointer deference after t.Fatal
 func TestEventChanCleanupOnCgroupRemoval(t *testing.T) {
 	checkCgroupMode(t)
 
 	cmd := exec.Command("cat")
 	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatalf("Failed to create cat process: %v", err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("Failed to start cat process: %v", err)
-	}
+	require.NoError(t, err, "failed to create cat process")
+
+	err = cmd.Start()
+	require.NoError(t, err, "failed to start cat process")
+
 	proc := cmd.Process
-	if proc == nil {
-		t.Fatal("Process is nil")
-	}
+	require.NotNil(t, proc, "process was nil")
 
 	group := fmt.Sprintf("testing-watcher-%d.scope", proc.Pid)
 	c, err := NewSystemd("", group, proc.Pid, &Resources{})
-	if err != nil {
-		t.Fatalf("Failed to init new cgroup manager: %v", err)
-	}
+	require.NoError(t, err, "failed to init new cgroup manager")
 
 	evCh, errCh := c.EventChan()
 
 	// give event goroutine a chance to start
 	time.Sleep(500 * time.Millisecond)
 
-	if err := stdin.Close(); err != nil {
-		t.Fatalf("Failed closing stdin: %v", err)
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("Failed waiting for cmd: %v", err)
-	}
+	err = stdin.Close()
+	require.NoError(t, err, "failed closing stdin")
+
+	err = cmd.Wait()
+	require.NoError(t, err, "failed waiting for cmd")
 
 	done := false
 	for !done {
 		select {
 		case <-evCh:
 		case err := <-errCh:
-			if err != nil {
-				t.Fatalf("Unexpected error on error channel: %v", err)
-			}
+			require.NoError(t, err, "unexpected error on error channel")
 			done = true
 		case <-time.After(5 * time.Second):
 			t.Fatal("Timed out")
@@ -147,35 +183,41 @@ func TestSystemdFullPath(t *testing.T) {
 func TestKill(t *testing.T) {
 	checkCgroupMode(t)
 	manager, err := NewManager(defaultCgroup2Path, "/test1", ToResources(&specs.LinuxResources{}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var procs []*exec.Cmd
-	for i := 0; i < 5; i++ {
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = manager.Delete()
+	})
+
+	var (
+		procs    []*exec.Cmd
+		numProcs = 5
+	)
+	for i := 0; i < numProcs; i++ {
 		cmd := exec.Command("sleep", "infinity")
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
+		// Don't leak the process if we fail to join the cg,
+		// send sigkill after tests over.
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Pdeathsig: syscall.SIGKILL,
 		}
-		if cmd.Process == nil {
-			t.Fatal("Process is nil")
-		}
-		if err := manager.AddProc(uint64(cmd.Process.Pid)); err != nil {
-			t.Fatal(err)
-		}
+		err = cmd.Start()
+		require.NoError(t, err)
+
+		err = manager.AddProc(uint64(cmd.Process.Pid))
+		require.NoError(t, err)
+
 		procs = append(procs, cmd)
 	}
 	// Verify we have 5 pids before beginning Kill below.
 	pids, err := manager.Procs(true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pids) != 5 {
-		t.Fatalf("expected 5 pids, got %d", len(pids))
-	}
+	require.NoError(t, err)
+	require.Len(t, pids, numProcs, "pid count unexpected")
+	threads, err := manager.Threads(true)
+	require.NoError(t, err)
+	require.Len(t, threads, numProcs, "pid count unexpected")
+
 	// Now run kill, and check that nothing is running after.
-	if err := manager.Kill(); err != nil {
-		t.Fatal(err)
-	}
+	err = manager.Kill()
+	require.NoError(t, err)
 
 	done := make(chan struct{})
 	go func() {
@@ -194,44 +236,56 @@ func TestKill(t *testing.T) {
 
 func TestMoveTo(t *testing.T) {
 	checkCgroupMode(t)
-	manager, err := NewManager(defaultCgroup2Path, "/test1", ToResources(&specs.LinuxResources{}))
-	if err != nil {
-		t.Error(err)
-		return
+
+	src, err := NewManager(defaultCgroup2Path, "/test-moveto-src", ToResources(&specs.LinuxResources{}))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = src.Kill()
+		_ = src.Delete()
+	})
+
+	cmd := exec.Command("sleep", "infinity")
+	// Don't leak the process if we fail to join the cg,
+	// send sigkill after tests over.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Pdeathsig: syscall.SIGKILL,
 	}
-	proc := os.Getpid()
-	if err := manager.AddProc(uint64(proc)); err != nil {
-		t.Error(err)
-		return
-	}
-	destination, err := NewManager(defaultCgroup2Path, "/test2", ToResources(&specs.LinuxResources{}))
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if err := manager.MoveTo(destination); err != nil {
-		t.Error(err)
-		return
-	}
+	err = cmd.Start()
+	require.NoError(t, err)
+
+	proc := cmd.Process.Pid
+	err = src.AddProc(uint64(proc))
+	require.NoError(t, err)
+
+	destination, err := NewManager(defaultCgroup2Path, "/test-moveto-dest", ToResources(&specs.LinuxResources{}))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = destination.Kill()
+		_ = destination.Delete()
+	})
+
+	err = src.MoveTo(destination)
+	require.NoError(t, err)
+
 	desProcs, err := destination.Procs(true)
-	if err != nil {
-		t.Error(err)
-		return
-	}
+	require.NoError(t, err)
+
 	desMap := make(map[int]bool)
 	for _, p := range desProcs {
 		desMap[int(p)] = true
 	}
 	if !desMap[proc] {
-		t.Errorf("process %v not in destination cgroup", proc)
-		return
+		t.Fatalf("process %v not in destination cgroup", proc)
 	}
 }
 
 func TestCgroupType(t *testing.T) {
 	checkCgroupMode(t)
-	manager, err := NewManager(defaultCgroup2Path, "/test1", ToResources(&specs.LinuxResources{}))
+	manager, err := NewManager(defaultCgroup2Path, "/test-type", ToResources(&specs.LinuxResources{}))
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = manager.Delete()
+	})
 
 	cgType, err := manager.GetType()
 	require.NoError(t, err)
@@ -243,4 +297,54 @@ func TestCgroupType(t *testing.T) {
 	cgType, err = manager.GetType()
 	require.NoError(t, err)
 	require.Equal(t, cgType, Threaded)
+}
+
+func TestCgroupv2PSIStats(t *testing.T) {
+	checkCgroupMode(t)
+	group := "/psi-test-cg"
+	groupPath := fmt.Sprintf("%s-%d", group, os.Getpid())
+	res := Resources{}
+	c, err := NewManager(defaultCgroup2Path, groupPath, &res)
+	require.NoError(t, err, "failed to init new cgroup manager")
+	t.Cleanup(func() {
+		os.Remove(c.path)
+	})
+
+	stats, err := c.Stat()
+	require.NoError(t, err, "failed to get cgroup stats")
+	if stats.CPU.PSI == nil || stats.Memory.PSI == nil || stats.Io.PSI == nil {
+		t.Error("expected psi not nil but got nil")
+	}
+}
+
+func TestSystemdCgroupPSIController(t *testing.T) {
+	checkCgroupMode(t)
+	group := fmt.Sprintf("testing-psi-%d.scope", os.Getpid())
+	pid := os.Getpid()
+	res := Resources{}
+	c, err := NewSystemd("", group, pid, &res)
+	require.NoError(t, err, "failed to init new cgroup systemd manager")
+
+	stats, err := c.Stat()
+	require.NoError(t, err, "failed to get cgroup stats")
+	if stats.CPU.PSI == nil || stats.Memory.PSI == nil || stats.Io.PSI == nil {
+		t.Error("expected psi not nil but got nil")
+	}
+}
+
+func BenchmarkStat(b *testing.B) {
+	checkCgroupMode(b)
+	group := "/stat-test-cg"
+	groupPath := fmt.Sprintf("%s-%d", group, os.Getpid())
+	c, err := NewManager(defaultCgroup2Path, groupPath, &Resources{})
+	require.NoErrorf(b, err, "failed to init new cgroup manager")
+	b.Cleanup(func() {
+		_ = c.Delete()
+	})
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := c.Stat()
+		require.NoError(b, err)
+	}
 }
