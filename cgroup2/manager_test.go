@@ -312,7 +312,7 @@ func TestCgroupv2PSIStats(t *testing.T) {
 
 	stats, err := c.Stat()
 	require.NoError(t, err, "failed to get cgroup stats")
-	if stats.CPU.PSI == nil || stats.Memory.PSI == nil || stats.Io.PSI == nil {
+	if stats.Cpu.Psi == nil || stats.Memory.Psi == nil || stats.Io.Psi == nil {
 		t.Error("expected psi not nil but got nil")
 	}
 }
@@ -327,7 +327,7 @@ func TestSystemdCgroupPSIController(t *testing.T) {
 
 	stats, err := c.Stat()
 	require.NoError(t, err, "failed to get cgroup stats")
-	if stats.CPU.PSI == nil || stats.Memory.PSI == nil || stats.Io.PSI == nil {
+	if stats.Cpu.Psi == nil || stats.Memory.Psi == nil || stats.Io.Psi == nil {
 		t.Error("expected psi not nil but got nil")
 	}
 }
