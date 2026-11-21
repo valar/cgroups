@@ -1,6 +1,6 @@
 module github.com/containerd/cgroups/v3
 
-go 1.18
+go 1.23
 
 require (
 	github.com/cilium/ebpf v0.11.0
@@ -12,7 +12,7 @@ require (
 	github.com/stretchr/testify v1.8.0
 	go.uber.org/goleak v1.1.12
 	golang.org/x/sys v0.6.0
-	google.golang.org/protobuf v1.27.1
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
